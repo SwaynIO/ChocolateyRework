@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  # Application PHP (Lumen)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chocolatey_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    networks:
+      - chocolatey_network
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+      - DB_HOST=mysql
+      - DB_DATABASE=chocolatey
+      - DB_USERNAME=chocolatey
+      - DB_PASSWORD=chocolatey_password
+      - CACHE_DRIVER=redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+  # Serveur web Nginx
+  nginx:
+    image: nginx:alpine
+    container_name: chocolatey_nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/chocolatey.conf:/etc/nginx/conf.d/default.conf
+      - ./docker/nginx/ssl:/etc/nginx/ssl
+    networks:
+      - chocolatey_network
+    depends_on:
+      - app
+
+  # Base de données MySQL
+  mysql:
+    image: mysql:8.0
+    container_name: chocolatey_mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: chocolatey
+      MYSQL_USER: chocolatey
+      MYSQL_PASSWORD: chocolatey_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - chocolatey_network
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Cache Redis
+  redis:
+    image: redis:7-alpine
+    container_name: chocolatey_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - chocolatey_network
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # phpMyAdmin pour gérer la BDD
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: chocolatey_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: chocolatey
+      PMA_PASSWORD: chocolatey_password
+      MYSQL_ROOT_PASSWORD: root_password
+    networks:
+      - chocolatey_network
+    depends_on:
+      - mysql
+
+  # Redis Commander pour gérer le cache
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: chocolatey_redis_commander
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    networks:
+      - chocolatey_network
+    depends_on:
+      - redis
+
+  # Mailhog pour tester les emails en local
+  mailhog:
+    image: mailhog/mailhog
+    container_name: chocolatey_mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - chocolatey_network
+
+networks:
+  chocolatey_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
